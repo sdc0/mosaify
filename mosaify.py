@@ -47,14 +47,14 @@ def mosaifyAxis(img, dim, num):
     return newdata
 
 if __name__ == "__main__":
-    parser = getParser()
+    parser = debugParser()
     args = parser.parse_args()
     
-    '''args.image = "mosaify/imgs/testRed.png"
-    args.output = "mosaify/mosaics/testRed.msc"
+    args.image = "imgs/testRed.png"
+    args.output = "mosaics/testRed.msc"
     args.mode = "greyscale"
     args.threshold = 100
-    args.threads = 20'''
+    args.threads = 20
     
     if not os.path.exists(os.path.dirname(args.output)):
         os.makedirs(os.path.dirname(args.output))
