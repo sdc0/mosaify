@@ -1,70 +1,154 @@
-from PIL import Image
+import cv2
+import math
 import numpy as np
 from argparse import ArgumentParser
+import matplotlib.pyplot as plt
 import os
+from bitstring import BitStream, BitArray
+from dataclasses import dataclass
 
-def debugParser():
-    parser = ArgumentParser()
-    parser.add_argument("-i", "--image", help="Image to file to mosaify")
-    parser.add_argument("-o", "--output", help="File to write mosaic data to")
-    parser.add_argument("-t", "--threads", help="Number of threads horizonntally across mosaic pattern")
-    parser.add_argument("-l", "--layers", default=None, help="The number of vertical layers of thread to use, defaults to image resolution")
-    parser.add_argument("-m", "--mode", choices=["rgb", "greyscale"], default="greyscale", help="Mode of mosaic, either colored or not")
-    parser.add_argument("--threshold", default=128, help="Threshold for color writing, any color below is treated as white")
-    return parser
+@dataclass
+class MosaicInstructions:
+    greyscale: bool
+    threads: int
+    crosses: int
+    data: list
 
+    def writeMosaic(self, file: str):
+        """
+        writes mosaic instructions to a file
+
+        args:
+            file: path to file to write to
+        """
+
+        bits = BitStream()
+
+        # write header
+        bits.append("0xdeadbeef")
+        bits.append("int:32=" + str(self.threads))
+        bits.append("int:32=" + str(self.crosses))
+        bits.append("bool=" + str(self.greyscale))
+        bits.append("0xdeadbeef")
+
+        # write data
+        for array in self.data:
+            bits.append(array)
+
+        if not os.path.exists(os.path.dirname(file)): os.makedirs(os.path.dirname(file))
+
+        with open(file, "wb") as f:
+            bits.tofile(f)
+
+    def readMosaic(file: str):
+        """
+        reads mosaic instructions from a file
+
+        args:
+            file: file to read from
+
+        returns:
+            MosaicInstruction from parsed file
+        """
+
+        with open(file, 'rb') as f:
+            bits = BitStream(f.read())
+
+        # read header
+        assert bits.read('uint:32') == 0xdeadbeef, 'file header does not start correctly'
+
+        threads = bits.read('int:32')
+        crosses = bits.read('int:32')
+        greyscale = bits.read('bool')
+
+        assert bits.read('uint:32') == 0xdeadbeef, 'file header does not end correctly'
+
+        # read data
+        data = []
+        for i in range(crosses):
+            data.append(BitArray(bits.read("bits:" + str(threads))))
+
+        return MosaicInstructions(greyscale, threads, crosses, data)
+    
+    def displayMosaic(self):
+        """
+        Displays a mosaic with Matplotlib
+        """
+
+        img = np.zeros((self.crosses, self.threads))
+        for i in range(len(self.data)):
+            for j in range(len(self.data[i])):
+                img[i][j] = 255 if (self.data[i][j] == 0) else 0
+
+        plt.imshow(img, cmap='gray') 
+        plt.show()
+
+    def __str__(self):
+        return f"{"Greyscale" if self.greyscale else "RGB"} mosaic with {self.threads} vertical threads and {self.crosses} horizontal crosses"
+    
 def getParser():
+    """
+    Creates a parser for user input
+
+    returns:
+        user input parser
+    """
+
     parser = ArgumentParser()
-    parser.add_argument("-i", "--image", required=True, help="Image to file to mosaify")
-    parser.add_argument("-o", "--output", required=True, help="File to write mosaic data to")
-    parser.add_argument("-t", "--threads", required=True, help="Number of threads horizonntally across mosaic pattern")
-    parser.add_argument("-l", "--layers", default=None, help="The number of vertical layers of thread to use, defaults to image resolution")
-    parser.add_argument("-m", "--mode", choices=["rgb", "greyscale"], default="greyscale", help="Mode of mosaic, either colored or not")
-    parser.add_argument("--threshold", default=128, help="Threshold for color writing, any color below is treated as white")
+
+    parser.add_argument("-rgb", "--rgb", dest="greyscale", action="store_false", help="Set mode to RGB")
+
+    parser.add_argument("-i", "--image", type=str, required=True, help="Path to image file")
+    parser.add_argument("-o", "--output", type=str, required=True, help="Path to output file")
+
+    parser.add_argument("-t", "--threads", type=int, required=True, help="Number of vertical threads")
+    parser.add_argument("-c", "--crosses", type=int, required=True, help="Number of horizontal threads across the vertical ones")
+
+    parser.add_argument("--threshold", default=150, type=int, help="Upper bound for what colors will be counted as positive")
+
+    parser.add_argument("-d", "--display", action="store_true", help="Program will display mosaic file after creating file")
+
     return parser
 
-def writeMosaic(mosaic, outFile, threshold):
-    with open(outFile, "w") as file:
-        for row in mosaic:
-            for element in row:
-                file.write("0" if int(element) < threshold else "1")
-            file.write("\n")
+def mosaify(image: str, greyscale: bool, threads: int, crosses: int, threshold: int) -> MosaicInstructions:
+    """
+    function that converts an image to a mosaic instruction bitstream
 
-def getImage(path, mode):
-    img = Image.open(path)
-    img = img.convert("L" if mode == "greyscale" else "RGB")
-    data = np.asarray(img, dtype="int32")
-    return data
+    args:
+        image: path to image to convert
+        greyscale: bool to determine if greyscale (True) or RGB (False)
+        threads: number of vertical threads running in the loom
+        crosses: number of horizontal threads will be put across the threads
 
-def mosaifyAxis(img, dim, num):
-    # img is assumed to be a numpy array of shape (h, w, c) or (h, w)
-    # dim is assumed to be either 0 or 1, corresponding to h and w
-    # num is assumed to be an even divisor of the current image dimension, otherwise excess is cut off
-    data = img.transpose((dim, 0 if dim == 1 else 1) if len(img.shape) == 2 else (dim, 0 if dim == 1 else 1, data.shape[2]))
-    newdata = np.zeros((num, data.shape[1]) if len(img.shape) == 2 else (num, data.shape[1], data.shape[2]))
-    for i, group in enumerate(np.split(data[:(len(data) - (len(data) % num))], num, 0)):
-        newdata[i] = np.average(group, 0)
-    return newdata
+    returns:
+        MosaicInstruction with all encoded data
+    """
+
+    img = np.array(cv2.imread(image, 0))
+    (row, col) = img.shape[0:2]
+
+    v = row / crosses
+    h = col / threads
+
+    reduced_img = []
+
+    # downsample image to bitarrays
+    for i in range(crosses):
+        reduced_img.append(BitArray())
+        for j in range(threads):
+            slice = img[math.floor(i * v):math.floor((i + 1) * v), math.floor(j * h):math.floor((j + 1) * h)]
+            reduced_img[i].append("bool=" + str(slice.sum() / slice.size < threshold))
+
+    return MosaicInstructions(greyscale, threads, crosses, reduced_img)
 
 if __name__ == "__main__":
-    parser = debugParser()
+    parser = getParser()
     args = parser.parse_args()
-    
-    args.image = "imgs/testRed.png"
-    args.output = "mosaics/testRed.msc"
-    args.mode = "greyscale"
-    args.threshold = 100
-    args.threads = 20
-    
-    if not os.path.exists(os.path.dirname(args.output)):
-        os.makedirs(os.path.dirname(args.output))
-    
-    img = getImage(args.image, args.mode)
-    
-    if args.mode == "greyscale" and len(img.shape) != 2: img = img.mean(2)
 
-    img = mosaifyAxis(img, 0, int(args.layers) if args.layers else img.shape[0])
-    img = mosaifyAxis(img, 1, int(args.threads))
-    
-    writeMosaic(img, args.output, int(args.threshold))
-    
+    assert args.greyscale, "RGB not implemented yet"
+
+    mosaic = mosaify(args.image, args.greyscale, args.threads, args.crosses, args.threshold)
+    mosaic.writeMosaic(args.output)
+
+    if args.display:
+        mosaic.displayMosaic()
