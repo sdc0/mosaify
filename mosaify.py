@@ -32,8 +32,13 @@ class MosaicInstructions:
         bits.append("0xdeadbeef")
 
         # write data
-        for array in self.data:
-            bits.append(array)
+        if self.greyscale:
+            for array in self.data:
+                bits.append(array)
+        else:
+            for channel in self.data:
+                for array in channel:
+                    bits.append(array)
 
         if not os.path.exists(os.path.dirname(file)): os.makedirs(os.path.dirname(file))
 
@@ -65,23 +70,37 @@ class MosaicInstructions:
 
         # read data
         data = []
-        for i in range(crosses):
-            data.append(BitArray(bits.read("bits:" + str(threads))))
+        if greyscale:
+            for i in range(crosses):
+                data.append(BitArray(bits.read("bits:" + str(threads))))
+        else:
+            for c in range(3):
+                data.append([])
+                for i in range(crosses):
+                    data[c].append(BitArray(bits.read("bits:" + str(threads))))
 
         return MosaicInstructions(greyscale, threads, crosses, data)
     
     def displayMosaic(self):
         """
-        Displays a mosaic with Matplotlib
+        Displays a mosaic with OpenCV
         """
 
-        img = np.zeros((self.crosses, self.threads))
-        for i in range(len(self.data)):
-            for j in range(len(self.data[i])):
-                img[i][j] = 255 if (self.data[i][j] == 0) else 0
+        if self.greyscale:
+            img = np.zeros((self.crosses, self.threads))
+            for i in range(len(self.data)):
+                for j in range(len(self.data[i])):
+                    img[i][j] = 255 if (self.data[i][j] == 0) else 0
+        else:
+            img = np.zeros((3, self.crosses, self.threads))
+            for c in range(3):
+                for i in range(self.crosses):
+                    for j in range(self.threads):
+                        img[c][i][j] = 255 if (self.data[c][i][j] == 0) else 0
 
-        plt.imshow(img, cmap='gray') 
-        plt.show()
+        cv2.imshow("Image", img.transpose(1, 2, 0))
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
 
     def __str__(self):
         return f"{"Greyscale" if self.greyscale else "RGB"} mosaic with {self.threads} vertical threads and {self.crosses} horizontal crosses"
@@ -104,7 +123,7 @@ def getParser():
     parser.add_argument("-t", "--threads", type=int, required=True, help="Number of vertical threads")
     parser.add_argument("-c", "--crosses", type=int, required=True, help="Number of horizontal threads across the vertical ones")
 
-    parser.add_argument("--threshold", default=150, type=int, help="Upper bound for what colors will be counted as positive")
+    parser.add_argument("-th", "--threshold", default=200, type=int, help="Upper bound for what colors will be counted as positive")
 
     parser.add_argument("-d", "--display", action="store_true", help="Program will display mosaic file after creating file")
 
@@ -124,7 +143,7 @@ def mosaify(image: str, greyscale: bool, threads: int, crosses: int, threshold: 
         MosaicInstruction with all encoded data
     """
 
-    img = np.array(cv2.imread(image, 0))
+    img = np.array(cv2.imread(image, 0)) if greyscale else np.array(cv2.imread(image))
     (row, col) = img.shape[0:2]
 
     v = row / crosses
@@ -133,11 +152,20 @@ def mosaify(image: str, greyscale: bool, threads: int, crosses: int, threshold: 
     reduced_img = []
 
     # downsample image to bitarrays
-    for i in range(crosses):
-        reduced_img.append(BitArray())
-        for j in range(threads):
-            slice = img[math.floor(i * v):math.floor((i + 1) * v), math.floor(j * h):math.floor((j + 1) * h)]
-            reduced_img[i].append("bool=" + str(slice.sum() / slice.size < threshold))
+    if greyscale:
+        for i in range(crosses):
+            reduced_img.append(BitArray())
+            for j in range(threads):
+                slice = img[math.floor(i * v):math.floor((i + 1) * v), math.floor(j * h):math.floor((j + 1) * h)]
+                reduced_img[i].append("bool=" + str(slice.sum() / slice.size < threshold))
+    else:
+        for channel in range(3):
+            reduced_img.append([])
+            for i in range(crosses):
+                reduced_img[channel].append(BitArray())
+                for j in range(threads):
+                    slice = img[math.floor(i * v):math.floor((i + 1) * v), math.floor(j * h):math.floor((j + 1) * h), :]
+                    reduced_img[channel][i].append("bool=" + str(slice[:, :, channel].sum() / slice[:, :, channel].size < threshold))
 
     return MosaicInstructions(greyscale, threads, crosses, reduced_img)
 
@@ -145,10 +173,8 @@ if __name__ == "__main__":
     parser = getParser()
     args = parser.parse_args()
 
-    assert args.greyscale, "RGB not implemented yet"
-
     mosaic = mosaify(args.image, args.greyscale, args.threads, args.crosses, args.threshold)
     mosaic.writeMosaic(args.output)
 
     if args.display:
-        mosaic.displayMosaic()
+        MosaicInstructions.readMosaic(args.output).displayMosaic()
