@@ -103,7 +103,6 @@ class MosaicInstructions:
         cv2.destroyAllWindows()
         
         if save is not None:
-            print(img.shape)
             cv2.imwrite(save, np.moveaxis(img, 0, -1) if not self.greyscale else img)
 
     def __str__(self):
@@ -197,8 +196,8 @@ if __name__ == "__main__":
     
         # display mosaic
         if args.display:
-            mosaic.displayMosaic(os.path.join(os.path.dirname(out_path), os.path.basename(out_path).split('.')[0] + '.png') if args.save else None)
+            mosaic.displayMosaic(os.path.join(os.path.dirname(out_path), os.path.basename(out_path).split('.')[0] + f"_mosaic_{args.threads}_{args.crosses}_{'grey' if args.greyscale else 'rgb'}.png") if args.save else None)
     else:
         if args.display:
             assert args.input.split(".")[-1] in ["mosaic"], "provide a .mosaic file to display"
-            MosaicInstructions.readMosaic(args.input).displayMosaic(os.path.join(os.path.dirname(args.input), os.path.basename(args.input).split('.')[0] + '.png') if args.save else None)
+            MosaicInstructions.readMosaic(args.input).displayMosaic(os.path.join(os.path.dirname(args.input), os.path.basename(args.input).split('.')[0] + f"_mosaic_{args.threads}_{args.crosses}_{'grey' if args.greyscale else 'rgb'}.png") if args.save else None)

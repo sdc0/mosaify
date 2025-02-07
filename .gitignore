@@ -6,3 +6,4 @@ mosaics/
 
 imgs/
 *.png
+!examples/*.png
