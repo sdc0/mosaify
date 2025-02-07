@@ -1,3 +1,8 @@
-mosaics/
 __pycache__/
 .vscode/
+
+mosaics/
+*.mosaic
+
+imgs/
+*.png

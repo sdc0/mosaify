@@ -56,17 +56,17 @@ class MosaicInstructions:
             MosaicInstruction from parsed file
         """
 
-        with open(file, 'rb') as f:
+        with open(file, "rb") as f:
             bits = BitStream(f.read())
 
         # read header
-        assert bits.read('uint:32') == 0xdeadbeef, 'file header does not start correctly'
+        assert bits.read("uint:32") == 0xdeadbeef, "file header does not start correctly"
 
-        threads = bits.read('int:32')
-        crosses = bits.read('int:32')
-        greyscale = bits.read('bool')
+        threads = bits.read("int:32")
+        crosses = bits.read("int:32")
+        greyscale = bits.read("bool")
 
-        assert bits.read('uint:32') == 0xdeadbeef, 'file header does not end correctly'
+        assert bits.read("uint:32") == 0xdeadbeef, "file header does not end correctly"
 
         # read data
         data = []
@@ -81,7 +81,7 @@ class MosaicInstructions:
 
         return MosaicInstructions(greyscale, threads, crosses, data)
     
-    def displayMosaic(self):
+    def displayMosaic(self, save=None):
         """
         Displays a mosaic with OpenCV
         """
@@ -97,13 +97,17 @@ class MosaicInstructions:
                 for i in range(self.crosses):
                     for j in range(self.threads):
                         img[c][i][j] = 255 if (self.data[c][i][j] == 0) else 0
-
-        cv2.imshow("Image", img.transpose(1, 2, 0))
+        
+        cv2.imshow("Mosaic", np.moveaxis(img, 0, -1) if not self.greyscale else img)
         cv2.waitKey(0)
         cv2.destroyAllWindows()
+        
+        if save is not None:
+            print(img.shape)
+            cv2.imwrite(save, np.moveaxis(img, 0, -1) if not self.greyscale else img)
 
     def __str__(self):
-        return f"{"Greyscale" if self.greyscale else "RGB"} mosaic with {self.threads} vertical threads and {self.crosses} horizontal crosses"
+        return f"{'Greyscale' if self.greyscale else 'RGB'} mosaic with {self.threads} vertical threads and {self.crosses} horizontal crosses"
     
 def getParser():
     """
@@ -117,15 +121,16 @@ def getParser():
 
     parser.add_argument("-rgb", "--rgb", dest="greyscale", action="store_false", help="Set mode to RGB")
 
-    parser.add_argument("-i", "--image", type=str, required=True, help="Path to image file")
-    parser.add_argument("-o", "--output", type=str, required=True, help="Path to output file")
+    parser.add_argument("-i", "--input", type=str, help="Path to input file")
+    parser.add_argument("-o", "--output", type=str, help="Path to output file")
 
-    parser.add_argument("-t", "--threads", type=int, required=True, help="Number of vertical threads")
-    parser.add_argument("-c", "--crosses", type=int, required=True, help="Number of horizontal threads across the vertical ones")
+    parser.add_argument("-t", "--threads", type=int, help="Number of vertical threads")
+    parser.add_argument("-c", "--crosses", type=int, help="Number of horizontal threads across the vertical ones")
 
     parser.add_argument("-th", "--threshold", default=200, type=int, help="Upper bound for what colors will be counted as positive")
 
     parser.add_argument("-d", "--display", action="store_true", help="Program will display mosaic file after creating file")
+    parser.add_argument("-s", "--save", action="store_true", help="Save image produced by display argument")
 
     return parser
 
@@ -172,9 +177,28 @@ def mosaify(image: str, greyscale: bool, threads: int, crosses: int, threshold: 
 if __name__ == "__main__":
     parser = getParser()
     args = parser.parse_args()
-
-    mosaic = mosaify(args.image, args.greyscale, args.threads, args.crosses, args.threshold)
-    mosaic.writeMosaic(args.output)
-
-    if args.display:
-        MosaicInstructions.readMosaic(args.output).displayMosaic()
+    
+    assert args.input is not None, f"provide an input {'image' if args.output is not None else 'mosaic'} file"
+    
+    if args.output is not None: # in create mosaic mode
+        assert os.path.isdir(args.output), "pass a directory to output argument"
+        assert args.input.split(".")[-1] in ["bmp", "dib", "jpeg", "jpg", "jpe", "jp2", "png", "webp", "pbm", "pgm", "ppm", "pxm", "pnm", "sr", "ras", "tiff", "tif", "exr", "hdr", "pic"], "provide an image file of accepted format"
+        
+        assert args.threads is not None, "provide a thread count"
+        if args.crosses is None:
+            args.crosses = args.threads
+    	
+    	# get output with file name
+        out_path = os.path.join(args.output, args.input.split("/")[-1].split(".")[0] + ".mosaic")
+        
+        # create and write mosaic
+        mosaic = mosaify(args.input, args.greyscale, args.threads, args.crosses, args.threshold)
+        mosaic.writeMosaic(out_path)
+    
+        # display mosaic
+        if args.display:
+            mosaic.displayMosaic(os.path.join(os.path.dirname(out_path), os.path.basename(out_path).split('.')[0] + '.png') if args.save else None)
+    else:
+        if args.display:
+            assert args.input.split(".")[-1] in ["mosaic"], "provide a .mosaic file to display"
+            MosaicInstructions.readMosaic(args.input).displayMosaic(os.path.join(os.path.dirname(args.input), os.path.basename(args.input).split('.')[0] + '.png') if args.save else None)
